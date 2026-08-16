@@ -1,0 +1,23 @@
+services:
+  # PostgreSQL 16 with PostGIS 3.4 pre-compiled
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: bantai_local_db
+    environment:
+      POSTGRES_DB: bantai_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_local:/var/lib/postgresql/data
+
+  # Redis for WebSocket Pub/Sub & Heartbeat Timers
+  redis:
+    image: redis:7-alpine
+    container_name: bantai_local_redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata_local:
