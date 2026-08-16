@@ -1,11 +1,6 @@
-import {
-  Controller,
-  Get,
-  Inject,
-  ServiceUnavailableException,
-} from '@nestjs/common';
-import { Pool, QueryResult } from 'pg';
-import { PG_CONNECTION } from './database/database.module';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { QueryResult } from 'pg';
+import { DatabaseService } from './database/database.service';
 
 interface HealthCheckDbRow {
   postgres_version: string;
@@ -15,14 +10,16 @@ interface HealthCheckDbRow {
 
 @Controller('health')
 export class AppController {
-  constructor(@Inject(PG_CONNECTION) private readonly pool: Pool) {}
+  // Inject the class directly. No string tokens needed.
+  constructor(private readonly db: DatabaseService) {}
 
   @Get()
   async checkHealth() {
     const startTime = Date.now();
 
     try {
-      const result: QueryResult<HealthCheckDbRow> = await this.pool.query(`
+      // Use the wrapped query method on our new service
+      const result: QueryResult<HealthCheckDbRow> = await this.db.query(`
         SELECT 
           version() AS postgres_version, 
           postgis_full_version() AS postgis_version,
