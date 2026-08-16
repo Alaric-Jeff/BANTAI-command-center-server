@@ -10,7 +10,6 @@ interface HealthCheckDbRow {
 
 @Controller('health')
 export class AppController {
-  // Inject the class directly. No string tokens needed.
   constructor(private readonly db: DatabaseService) {}
 
   @Get()
@@ -18,7 +17,6 @@ export class AppController {
     const startTime = Date.now();
 
     try {
-      // Use the wrapped query method on our new service
       const result: QueryResult<HealthCheckDbRow> = await this.db.query(`
         SELECT 
           version() AS postgres_version, 
