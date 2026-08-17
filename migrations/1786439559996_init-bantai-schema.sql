@@ -20,7 +20,8 @@ CREATE TYPE device_status AS ENUM ('inventory', 'paired', 'reported_lost', 'deco
 CREATE TYPE audit_action AS ENUM (
     'CREATE_CC', 'CREATE_USER', 'UPDATE_USER', 'CHANGE_ROLE',
     'REGISTER_DEVICE', 'PAIR_DEVICE', 'UNPAIR_DEVICE',
-    'ACKNOWLEDGE_ALERT', 'DISPATCH_RESPONDER', 'RESOLVE_ALERT'
+    'ACKNOWLEDGE_ALERT', 'DISPATCH_RESPONDER', 'RESOLVE_ALERT',
+    'AUTH_LOGIN', 'AUTH_LOGOUT', 'AUTH_REVOKE_SESSION'
 );
 CREATE TYPE auth_provider_enum AS ENUM ('local', 'google', 'apple');
 
@@ -41,8 +42,8 @@ CREATE TABLE IF NOT EXISTS user_account (
     f_name VARCHAR(50) NOT NULL,
     l_name VARCHAR(50) NOT NULL,
     m_name VARCHAR(50),
-    email VARCHAR(150) NOT NULL UNIQUE,
-    m_number VARCHAR(15) NOT NULL,
+    email VARCHAR(150) UNIQUE,
+    m_number VARCHAR(15),
     role user_role NOT NULL,
     command_center_id UUID REFERENCES command_center(id) ON DELETE SET NULL,
     
@@ -53,10 +54,15 @@ CREATE TABLE IF NOT EXISTS user_account (
     password_hash VARCHAR(255), 
     
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ DEFAULT NULL,
 
     CONSTRAINT branch_scope_check CHECK (
         (role IN ('admin', 'responder') AND command_center_id IS NOT NULL)
         OR (role IN ('driver', 'super') AND command_center_id IS NULL)
+    ),
+    CONSTRAINT chck_role_email_requirement CHECK (
+        (role IN ('driver', 'admin', 'super') AND email IS NOT NULL)
+        OR (role = 'responder')
     ),
     CONSTRAINT chck_m_number_format CHECK (m_number ~ '^\+639\d{9}$'),
     CONSTRAINT chck_f_name_format CHECK (f_name ~ '^[[:alpha:]\s\-]+$'),
@@ -121,7 +127,22 @@ CREATE TABLE IF NOT EXISTS device (
     )
 );
 
--- 5. INCIDENT & RESPONSE
+-- 5. STATEFUL AUTHENTICATION & SESSION MANAGEMENT
+CREATE TABLE IF NOT EXISTS user_session (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES user_account(id) ON DELETE CASCADE,
+    device_id UUID REFERENCES device(id) ON DELETE SET NULL,
+    refresh_token_hash VARCHAR(255) NOT NULL,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    is_revoked BOOLEAN NOT NULL DEFAULT false,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT chck_expires_future CHECK (expires_at > created_at)
+);
+
+-- 6. INCIDENT & RESPONSE
 CREATE TABLE IF NOT EXISTS alerts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     driver_id UUID NOT NULL REFERENCES user_account(id) ON DELETE CASCADE,
@@ -145,12 +166,12 @@ CREATE TABLE IF NOT EXISTS alert_branch_response (
     acknowledged_at TIMESTAMPTZ, 
     dispatched_at TIMESTAMPTZ,
     arrived_at TIMESTAMPTZ,
-    resolved_at TIMESTAMPTZ,
+    resolved_at TIMESTAMPTZ, 
     
     PRIMARY KEY (alert_id, command_center_id)
 );
 
--- 6. SYSTEM AUDIT LOGGING
+-- 7. SYSTEM AUDIT LOGGING
 CREATE TABLE IF NOT EXISTS system_audit_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_id UUID REFERENCES user_account(id) ON DELETE SET NULL,
@@ -163,7 +184,7 @@ CREATE TABLE IF NOT EXISTS system_audit_log (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 7. DASHBOARD VIEWS
+-- 8. DASHBOARD VIEWS
 CREATE OR REPLACE VIEW branch_incident_logs AS
 SELECT 
     a.id AS alert_id,
@@ -183,9 +204,10 @@ FROM alerts a
 JOIN alert_branch_response abr ON a.id = abr.alert_id
 JOIN user_account u ON a.driver_id = u.id
 LEFT JOIN device d ON a.device_id = d.id
-LEFT JOIN user_account r ON abr.assigned_responder_id = r.id;
+LEFT JOIN user_account r ON abr.assigned_responder_id = r.id
+WHERE u.deleted_at IS NULL AND (r.deleted_at IS NULL OR r.id IS NULL);
 
--- 8. PERFORMANCE INDEXES
+-- 9. PERFORMANCE INDEXES
 CREATE INDEX idx_command_center_location ON command_center USING GIST (location);
 CREATE INDEX idx_alerts_location ON alerts USING GIST (location);
 
@@ -198,9 +220,16 @@ CREATE INDEX idx_abr_assigned_responder ON alert_branch_response(assigned_respon
 CREATE INDEX idx_audit_cc_id ON system_audit_log(command_center_id);
 CREATE INDEX idx_audit_created_at ON system_audit_log(created_at);
 
--- Dispatch & Hearbeat Indexes
+-- Session Indexes
+CREATE INDEX idx_user_session_token ON user_session(refresh_token_hash);
+CREATE INDEX idx_user_session_user_id ON user_session(user_id) WHERE is_revoked = false;
+CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
+-- Dispatch & Heartbeat Indexes
 CREATE INDEX idx_r_profile_location ON r_profile USING GIST (last_known_location);
 CREATE INDEX idx_r_profile_availability ON r_profile(availability, last_active_at);
+
+-- Soft Delete Index (Index active records for performance)
+CREATE INDEX idx_user_account_deleted_at ON user_account(deleted_at) WHERE deleted_at IS NULL;
 
 
 -- Down Migration
@@ -209,6 +238,7 @@ DROP VIEW IF EXISTS branch_incident_logs;
 DROP TABLE IF EXISTS system_audit_log;
 DROP TABLE IF EXISTS alert_branch_response;
 DROP TABLE IF EXISTS alerts;
+DROP TABLE IF EXISTS user_session;
 DROP TABLE IF EXISTS device;
 DROP TABLE IF EXISTS r_profile;
 DROP TABLE IF EXISTS d_profile;
