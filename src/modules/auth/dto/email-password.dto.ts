@@ -1,9 +1,10 @@
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
 
-export class LocalSignInDTO {
+export class EmailPasswordDto {
   @IsString()
+  @IsEmail()
   @IsNotEmpty()
-  badge_number!: string;
+  email!: string;
 
   @IsString()
   @IsNotEmpty()

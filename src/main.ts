@@ -6,12 +6,14 @@ import {
 import { ConfigService } from '@nestjs/config';
 import fastifyCookie from '@fastify/cookie';
 import { AppModule } from './app.module';
+import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
-      logger: false,
+      logger: true,
+      trustProxy: true,
     }),
   );
 
@@ -24,8 +26,16 @@ async function bootstrap() {
     'http://localhost:3001',
   );
   const cookieSecret = configService.getOrThrow<string>('COOKIE_SECRET');
+  console.log(`current cookie secret: ${cookieSecret}`);
 
   app.setGlobalPrefix(apiPrefix);
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
 
   await app.register(fastifyCookie as any, {
     secret: cookieSecret,

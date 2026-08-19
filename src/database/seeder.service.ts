@@ -2,7 +2,7 @@ import { Injectable, OnApplicationBootstrap, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { DatabaseService } from './database.service';
-import { Role } from '../auth/enums/role.enum';
+import { Role } from '../modules/auth/enums/role.enum';
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -31,7 +31,7 @@ export class SeederService implements OnApplicationBootstrap {
     try {
       const existingUser = await this.db.query(
         'SELECT id FROM user_account WHERE email = $1 OR role = $2 LIMIT 1',
-        [email, Role.SUPERADMIN],
+        [email, Role.SUPER],
       );
 
       if (existingUser.rowCount && existingUser.rowCount > 0) {
@@ -46,14 +46,7 @@ export class SeederService implements OnApplicationBootstrap {
         `INSERT INTO user_account (email, password_hash, role, f_name, l_name, m_number)
          VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (email) DO NOTHING`,
-        [
-          email,
-          hashedPassword,
-          Role.SUPERADMIN,
-          'Super',
-          'Admin',
-          '+639763172042',
-        ],
+        [email, hashedPassword, Role.SUPER, 'Super', 'Admin', '+639763172042'],
       );
 
       this.logger.log(`Superadmin account seeded successfully: ${email}`);
