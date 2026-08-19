@@ -3,6 +3,10 @@
 /node_modules
 /build
 
+# curl cookie jar files — can contain live session tokens, never commit
+cookies.txt
+*.cookies.txt
+
 # Logs
 logs
 *.log
