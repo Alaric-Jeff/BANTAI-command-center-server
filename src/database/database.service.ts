@@ -5,7 +5,7 @@ import {
   OnApplicationShutdown,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Pool, QueryResult, QueryResultRow } from 'pg';
+import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 interface TimeRow {
   now: Date;
@@ -69,7 +69,6 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
     }
   }
 
-  // Wrapper method so you don't have to expose the raw pool everywhere
   async query<T extends QueryResultRow = any>(
     text: string,
     params?: any[],
@@ -77,8 +76,52 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
     return this.pool.query<T>(text, params);
   }
 
-  // Useful if you need the raw client for transactions
   getPool(): Pool {
     return this.pool;
+  }
+
+  /**
+   * Runs a set of queries against a single, dedicated client wrapped in
+   * BEGIN/COMMIT/ROLLBACK, so multiple statements either all succeed or
+   * all roll back together. Use this whenever a piece of logic needs
+   * more than one write to land atomically (e.g. rotating a refresh
+   * session: delete old + insert new as one unit).
+   *
+   * IMPORTANT: inside the callback, always query via the provided
+   * `client` parameter — never via `this.query()` or `this.pool` — or
+   * those calls will run on a different connection outside the
+   * transaction and won't be included in the commit/rollback.
+   *
+   * On any thrown error inside `fn`, the transaction is rolled back and
+   * the original error is re-thrown to the caller (not swallowed), so
+   * callers can still catch and handle/log it normally. The client is
+   * always released back to the pool in a `finally`, whether the
+   * transaction commits, rolls back, or the callback throws before
+   * either.
+   */
+  async withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+
+    try {
+      await client.query('BEGIN');
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error: unknown) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError: unknown) {
+        const rollbackMessage =
+          rollbackError instanceof Error
+            ? rollbackError.message
+            : 'Unknown error during rollback';
+        this.logger.error(
+          `Failed to roll back transaction cleanly: ${rollbackMessage}`,
+        );
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }

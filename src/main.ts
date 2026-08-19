@@ -1,12 +1,55 @@
 import { NestFactory } from '@nestjs/core';
-import { FastifyAdapter } from '@nestjs/platform-fastify';
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from '@nestjs/platform-fastify';
+import { ConfigService } from '@nestjs/config';
+import fastifyCookie from '@fastify/cookie';
 import { AppModule } from './app.module';
+import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
-  const app = await NestFactory.create(
+  const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter({ logger: false }),
+    new FastifyAdapter({
+      logger: true,
+      trustProxy: true,
+    }),
   );
-  await app.listen(3000, '0.0.0.0');
+
+  const configService = app.get(ConfigService);
+  const port = configService.get<number>('PORT', 3000);
+  const host = configService.get<string>('HOST', '0.0.0.0');
+  const apiPrefix = configService.get<string>('API_PREFIX', '/api/v1');
+  const corsOrigin = configService.get<string>(
+    'CORS_ORIGIN',
+    'http://localhost:3001',
+  );
+  const cookieSecret = configService.getOrThrow<string>('COOKIE_SECRET');
+  console.log(`current cookie secret: ${cookieSecret}`);
+
+  app.setGlobalPrefix(apiPrefix);
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
+  await app.register(fastifyCookie as any, {
+    secret: cookieSecret,
+  });
+
+  app.enableCors({
+    origin: corsOrigin,
+    credentials: true,
+  });
+
+  await app.listen(port, host);
 }
-bootstrap();
+
+bootstrap().catch((err) => {
+  console.error('Error during application bootstrap:', err);
+  process.exit(1);
+});
