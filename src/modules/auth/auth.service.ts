@@ -8,6 +8,7 @@ import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import { randomUUID } from 'crypto';
 import ms from 'ms';
 import { AuthRepository } from './auth.repository';
 import { EmailPasswordDto } from './dto/email-password.dto';
@@ -51,6 +52,18 @@ export class AuthService {
    * pair plus the refresh token's hash and expiry, so callers can decide
    * how to persist the session (a plain insert for a new login, or an
    * atomic rotate-in-transaction for a refresh).
+   *
+   * The refresh token payload includes a random `jti` (JWT ID). Without
+   * it, two refresh tokens signed for the same user within the same
+   * wall-clock second are byte-for-byte IDENTICAL: the JWT `iat` claim
+   * only has 1-second resolution, HS256 signing is fully deterministic
+   * (no randomness), and the payload was otherwise just `{ sub: userId }`.
+   * That meant a login followed by an immediate refresh (or two refreshes
+   * within the same second) could produce the exact same token twice,
+   * silently defeating rotation — the "new" session would hash-collide
+   * with the "old" one instead of being a genuinely distinct credential.
+   * A random UUID per signing call guarantees uniqueness regardless of
+   * timing, with no other behavior change.
    */
   private async signTokens(
     userId: string,
@@ -67,7 +80,7 @@ export class AuthService {
         ) as JwtSignOptions['expiresIn'],
       }),
       this.jwtService.signAsync(
-        { sub: userId },
+        { sub: userId, jti: randomUUID() },
         {
           secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
           expiresIn: this.configService.getOrThrow<string>(
@@ -88,12 +101,6 @@ export class AuthService {
     return { accessToken, refreshToken, refreshTokenHash, refreshExpiresAt };
   }
 
-  /**
-   * Signs a new token pair AND persists it as a brand-new session
-   * (a plain insert — createSession still wipes any prior session for
-   * non-SUPER roles as a side effect). Used for fresh logins where
-   * there's no "old" session being rotated.
-   */
   async generateTokens(
     userId: string,
     role: Role,

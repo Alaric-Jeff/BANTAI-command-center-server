@@ -104,12 +104,6 @@ export class AuthRepository {
     role: Role,
   ): Promise<void> {
     await this.db.withTransaction(async (client) => {
-      console.log(
-        '>>> atomicSession CALLED for role:',
-        role,
-        'oldHash:',
-        oldHash.slice(0, 8),
-      );
       if (role !== Role.SUPER) {
         await client.query(`DELETE FROM user_session WHERE user_id = $1;`, [
           userId,

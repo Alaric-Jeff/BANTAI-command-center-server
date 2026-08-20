@@ -26,8 +26,6 @@ async function bootstrap() {
     'http://localhost:3001',
   );
   const cookieSecret = configService.getOrThrow<string>('COOKIE_SECRET');
-  console.log(`current cookie secret: ${cookieSecret}`);
-
   app.setGlobalPrefix(apiPrefix);
   app.useGlobalPipes(
     new ValidationPipe({
